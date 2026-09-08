@@ -1,118 +1,127 @@
 # OBS Studio for Android
 
-把 [OBS Studio](https://github.com/obsproject/obs-studio) 移植到 Android 的工作分支。当前基线是上游 **32.2.1**（commit `57bfcf10a`），在其之上提供：`libobs` 的 Android 平台层、GLES/EGL 渲染后端、Qt 前端的 Android 适配、四个 `android-*` 采集插件，以及 APK 侧的 Java 宿主。
+**English** | [简体中文](README_CN.md)
 
-目标是**能录、能推、能用的安卓端 OBS**，而不是演示品。开发与验证全部在 **WSL2 + arm64 真机** 上进行。
+A working branch porting [OBS Studio](https://github.com/obsproject/obs-studio) to Android. The current baseline is upstream **32.2.1** (commit `57bfcf10a`), on top of which this repo provides: the `libobs` Android platform layer, a GLES/EGL rendering backend, Android adaptation of the Qt frontend, four `android-*` capture plugins, and the Java host on the APK side.
 
-> **English (TL;DR)** — An Android port of OBS Studio 32.2.1. libobs, the OpenGL ES backend and the Qt frontend build and run as a native Android APK (`com.obsproject.studio`, minSdk 29 / targetSdk 35, arm64-v8a). Verified on a real device: scene preview with correct sRGB output, recording (mp4/mkv, x264 + AAC), Camera2 capture with front/back switching, MediaProjection screen capture (including recursive capture of OBS's own window), system audio capture into the mixer, and a foreground keep-alive service for long sessions. Landscape-only UI. GPL-2.0-or-later, same as upstream.
+The goal is **an OBS on Android that can record, stream, and actually be used** — not a demo. All development and verification is done on **WSL2 + a real arm64 device**.
+
+![OBS Studio running on a real Android device: recursive screen-capture preview](screenshot.png)
 
 ---
 
-## 状态速览
+## Status at a glance
 
-| 能力 | 状态 | 说明 |
+| Capability | Status | Notes |
 |---|---|---|
-| libobs + 插件 + Qt 前端编成 APK | ✅ 已验证 | arm64-v8a，WSL2 构建链 |
-| 预览、场景、来源、滤镜面板 | ✅ 已验证 | 横屏专用，按 16:10 布局；sRGB 窗口面，颜色与系统一致 |
-| 录制（mp4/mkv，x264 + AAC） | ✅ 已验证 | 录出的文件视频/音频轨正常 |
-| 内置摄像头采集源（Camera2 NDK） | ✅ 已验证 | 真机实测，含主界面一键前后置切换 |
-| 屏幕采集源（MediaProjection + VirtualDisplay） | ✅ 已验证 | 真机实测，可递归采集 OBS 自身窗口 |
-| 系统内录（AudioPlaybackCapture） | ✅ 已验证 | 真机实测进混音器，录制有声 |
-| 前台保活服务（长时录制/推流不被杀） | ✅ 已验证 | 真机长时运行不被系统回收 |
-| 推流（RTMP） | ⚠️ 未在本轮回归 | 编译启用，但近期只回归了录制路径 |
+| libobs + plugins + Qt frontend built into an APK | ✅ Verified | arm64-v8a, WSL2 build chain |
+| Preview, scenes, sources, filter panels | ✅ Verified | Landscape only, laid out for 16:10; sRGB window surface, colors match the system |
+| Recording (mp4/mkv, x264 + AAC) | ✅ Verified | Recorded files have valid video/audio tracks |
+| Built-in camera source (Camera2 NDK) | ✅ Verified | Tested on a real device, with one-tap front/back switching on the main UI |
+| Screen capture source (MediaProjection + VirtualDisplay) | ✅ Verified | Tested on a real device; can recursively capture OBS's own window |
+| System audio capture (AudioPlaybackCapture) | ✅ Verified | Reaches the mixer on a real device; recordings have sound |
+| Foreground keep-alive service (survives long record/stream sessions) | ✅ Verified | Not reclaimed by the system during long runs on a real device |
+| Streaming (RTMP) | ⚠️ Not regressed this round | Enabled at compile time, but only the recording path has been regressed recently |
 
-## 目录结构
+## Repository layout
 
 ```
 OBS_for_Android/
-├── obs-studio/          上游 OBS 源码 + 全部移植改动（libobs Android 平台层、GLES/EGL 后端、
-│                        Qt 前端适配、android-* 采集插件、Java 宿主）
-├── android-shell/       最小 Qt Android 壳（早期里程碑的回归载体），含签名用标准 debug keystore
-├── deps-android/        第三方依赖的下载与交叉编译脚本（版本号真源在 versions.sh；
-│                        src/ 下载物与 prebuilt/ 编译产物不入库，需自行跑脚本生成）
+├── obs-studio/          Upstream OBS source + all porting changes (libobs Android platform
+│                        layer, GLES/EGL backend, Qt frontend adaptation, android-* capture
+│                        plugins, Java host)
+├── android-shell/       Minimal Qt Android shell (regression vehicle for early milestones),
+│                        contains the standard debug keystore used for signing
+├── deps-android/        Download & cross-compile scripts for third-party dependencies
+│                        (versions.sh is the single source of truth for versions; the src/
+│                        downloads and prebuilt/ outputs are not committed — regenerate them
+│                        by running the scripts)
 └── scripts/
-    └── build-frontend-apk-wsl.sh    前端 APK 的一键构建/签名脚本（WSL，arm64-v8a）
+    └── build-frontend-apk-wsl.sh    One-shot build/sign script for the frontend APK
+                                     (WSL, arm64-v8a)
 ```
 
-`obs-studio/frontend/cmake/android/AndroidManifest.xml` 的头部注释记录了每一条权限、每一个 `screenOrientation` 的理由——想理解"为什么清单长这样"，先读它。
+Not committed: `releases/` (installable APKs are attached to GitHub Releases), `prebuilt/` (the APK's native payload, a build artifact), `build-fe-*/` (CMake build directories).
 
-## 环境要求
+The header comments of `obs-studio/frontend/cmake/android/AndroidManifest.xml` record the rationale for every permission and every `screenOrientation` — if you want to understand "why the manifest looks like this", read that first.
 
-以下版本全部是实际用过的，不是"应该也行"：
+## Requirements
 
-| 组件 | 版本 | 备注 |
+Every version below is one actually used — not "should also work":
+
+| Component | Version | Notes |
 |---|---|---|
-| 主机 | WSL2（Ubuntu） | 访问 GitHub 需要宿主代理（见"坑"第 2 条） |
+| Host | WSL2 (Ubuntu) | Reaching GitHub requires the host-side proxy (see pitfall #2) |
 | Android NDK | **30.0.16138531** | `linux-x86_64` |
-| Android SDK | build-tools **36.0.0**，platform **android-35** | 编译期 `ANDROID_PLATFORM=android-29` |
-| Qt | **6.9.3**，需装 `android_arm64_v8a` + **`gcc_64`（作为 QT_HOST_PATH，提供 androiddeployqt，缺了出不了包）** | |
-| CMake | 3.31.6（pip 装的） | |
+| Android SDK | build-tools **36.0.0**, platform **android-35** | Compiled with `ANDROID_PLATFORM=android-29` |
+| Qt | **6.9.3**, needs `android_arm64_v8a` + **`gcc_64` (as QT_HOST_PATH, provides androiddeployqt — no package without it)** | |
+| CMake | 3.31.6 (installed via pip) | |
 | Ninja | 1.13.2 | |
 | Gradle | 8.14.5 | |
-| JDK | **17** | 见"坑"第 1 条 |
-| 目标设备 | Android 10（API 29）及以上，arm64 真机 | 调试用 adb 无线调试（`adb pair` + `adb connect`） |
+| JDK | **17** | See pitfall #1 |
+| Target device | Android 10 (API 29) or newer, arm64 hardware | Debug over adb wireless debugging (`adb pair` + `adb connect`) |
 
-## 构建
+## Building
 
-### 0. 环境
+### 0. Environment
 
-工具链路径由环境变量给出（`ANDROID_SDK_ROOT` / `QT_DIR` / `QT_HOST_PATH` / `NDK_ROOT`），构建脚本开头会逐个检查、缺了直接报错。
+Toolchain paths come from environment variables (`ANDROID_SDK_ROOT` / `QT_DIR` / `QT_HOST_PATH` / `NDK_ROOT`). The build script checks each one up front and fails loudly if any is missing.
 
-### 1. 第三方依赖
+### 1. Third-party dependencies
 
 ```bash
 cd deps-android
-./fetch.sh core        # 下载依赖源码（simde/uthash/jansson/x264/ffmpeg/…，见 versions.sh）
-./build.sh             # 交叉编译到 prebuilt/<abi>/
+./fetch.sh core        # Download dependency sources (simde/uthash/jansson/x264/ffmpeg/…, see versions.sh)
+./build.sh             # Cross-compile into prebuilt/<abi>/
 ```
 
-依赖清单与版本号的唯一真源是 `deps-android/versions.sh`，按移植阶段分批：`core`（libobs 必需）、`usb`（OTG 采集）、`filters`（滤镜/文字源）、`output`（推流/录制）。
+`deps-android/versions.sh` is the single source of truth for the dependency list and versions, batched by porting stage: `core` (required by libobs), `usb` (OTG capture), `filters` (filters/text sources), `output` (streaming/recording).
 
-### 2. 前端 APK（libobs + 渲染后端 + 插件 + Qt 前端）
+### 2. The frontend APK (libobs + rendering backend + plugins + Qt frontend)
 
 ```bash
-bash scripts/build-frontend-apk-wsl.sh            # 配置 + 构建 + 打包 + 签名 + 校验
-bash scripts/build-frontend-apk-wsl.sh configure  # 只跑 CMake configure（快速验证 CMake 改动）
+bash scripts/build-frontend-apk-wsl.sh            # Configure + build + package + sign + verify
+bash scripts/build-frontend-apk-wsl.sh configure  # CMake configure only (quick check of CMake changes)
 ```
 
-产物自动归档到 `releases/OBS-Android-arm64-v8a-wsl-<时间戳>.apk`，装机：
+The artifact is automatically archived to `releases/OBS-Android-arm64-v8a-wsl-<timestamp>.apk`. To install:
 
 ```bash
-adb connect <手机IP>:<端口>      # 手机开发者选项 → 无线调试
-adb install -r releases/OBS-Android-arm64-v8a-wsl-<时间戳>.apk
+adb connect <phone-IP>:<port>      # On the phone: Developer options → Wireless debugging
+adb install -r releases/OBS-Android-arm64-v8a-wsl-<timestamp>.apk
 ```
 
-启用的模块：`android-audio` `android-camera` `android-capture` `android-screen` `image-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`。禁用：脚本引擎、Idian Playground、Restream/Twitch/YouTube API 连接。
+Enabled modules: `android-audio` `android-camera` `android-capture` `android-screen` `image-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`. Disabled: scripting, Idian Playground, Restream/Twitch/YouTube API integrations.
 
-### 3. 只想改一个 .cpp 时
+### 3. When you only changed one .cpp
 
-不要等整轮 Gradle/ninja。从 `build.ninja` 里把**原样**那条编译命令抄出来（含 `-Werror` 与全部 `-D`/`-I`），加 `-fsyntax-only` 当场判：
+Don't wait for a full Gradle/ninja round. Copy the **exact** compile command out of `build.ninja` (including `-Werror` and all `-D`/`-I` flags) and add `-fsyntax-only` to check it on the spot:
 
 ```bash
 ninja -C build-fe-arm64-v8a-plugins -t commands plugins/android-screen/CMakeFiles/android-screen.dir/screen-capture.c.o
 ```
 
-## 构建/调试的坑（都付过学费）
+## Build/debug pitfalls (all paid for)
 
-1. **Gradle 8.12/8.14 不支持 JDK 25**（class file major version 69）。必须显式把 `JAVA_HOME` 钉到 JDK 17。
-2. **GitHub 在 WSL 内不可直连**，要走宿主机的代理：宿主代理客户端需开"允许局域网连接"，且 Windows 防火墙要放行对应端口的入站（WSL 子网算外部网络）。`fetch.sh` 按域名自动加代理（`OBS_PROXY` 环境变量可覆盖）。注意 WSL 重启后宿主 IP 可能变，`ip route | awk '/default/{print $3}'` 拿当前值。
-3. **Release 模式下 `androiddeployqt` 不签名**，脚本用 `apksigner` 自签。仓库里的 `android-shell/debug.keystore` 是 Android 标准 debug key（别名 `androiddebugkey`、口令 `android`），仅供本地开发。
-4. **插件 `.so` 要手工暂存进 `libs/<abi>/` 并清掉 gradle 的 native 中间件**，否则新编出的插件不进包，测的还是上一版——`build-frontend-apk-wsl.sh` 里那段"强制重打包"就是为这个。判据一律取 **APK 里那份**，不取 rundir。
-5. **OBS 的 `blog()` 不进 logcat。** 日志在设备上 `/data/user/0/com.obsproject.studio/files/.config/obs-studio/logs/*.txt`。APK 清单带 `android:debuggable="true"`，非 root 真机用 `adb exec-out run-as com.obsproject.studio cat ...` 即可读取——**出正式发布包前记得把这个属性摘掉**。
-6. **判断产物身份只能看内容**（哈希 / `strings` / 行为），不能看文件大小或修改时间。
+1. **Gradle 8.12/8.14 does not support JDK 25** (class file major version 69). `JAVA_HOME` must be pinned to JDK 17.
+2. **GitHub is not directly reachable inside WSL** — traffic goes through the host's proxy: the proxy client on the Windows host must enable "Allow LAN connections", and Windows Firewall must allow inbound traffic on that port (the WSL subnet counts as an external network). `fetch.sh` applies the proxy per domain automatically (override with the `OBS_PROXY` environment variable). Note that the host IP may change after a WSL restart — get the current one with `ip route | awk '/default/{print $3}'`.
+3. **`androiddeployqt` does not sign in release mode**; the script self-signs with `apksigner`. The `android-shell/debug.keystore` in this repo is the standard Android debug key (alias `androiddebugkey`, password `android`) — for local development only.
+4. **Plugin `.so` files must be manually staged into `libs/<abi>/` and Gradle's native intermediates must be wiped**, otherwise freshly built plugins don't make it into the package and you end up testing the previous version — that's what the "force repackage" section of `build-frontend-apk-wsl.sh` does. Always verify against the copy **inside the APK**, never the rundir copy.
+5. **OBS's `blog()` does not go to logcat.** Logs live on the device at `/data/user/0/com.obsproject.studio/files/.config/obs-studio/logs/*.txt`. The APK manifest carries `android:debuggable="true"`, so on a non-rooted device `adb exec-out run-as com.obsproject.studio cat ...` is enough — **remember to remove that attribute before any formal release build**.
+6. **Artifact identity can only be judged by content** (hashes / `strings` / behavior) — never by file size or mtime.
 
-## 权限清单（运行时/清单声明）
+## Permissions (runtime / manifest)
 
-`INTERNET`、`RECORD_AUDIO`、`CAMERA`、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_SPECIAL_USE`、`FOREGROUND_SERVICE_MEDIA_PROJECTION`、`WAKE_LOCK`、`POST_NOTIFICATIONS`、`READ/WRITE_EXTERNAL_STORAGE`；`uses-feature` 里 `usb.host`、`camera`、`camera.any` 全部 `required=false`（不让没有 OTG 或没有相机的设备把包装不上）。
+`INTERNET`, `RECORD_AUDIO`, `CAMERA`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `FOREGROUND_SERVICE_MEDIA_PROJECTION`, `WAKE_LOCK`, `POST_NOTIFICATIONS`, `READ/WRITE_EXTERNAL_STORAGE`; in `uses-feature`, `usb.host`, `camera`, and `camera.any` are all `required=false` (so devices without OTG or without a camera can still install the app).
 
-首启会把缺的权限并成一次 `requestPermissions` 弹窗。前台服务类型是 `specialUse|mediaProjection` 两档合一——不起第二个服务、不加第二条常驻通知；选 `specialUse` 的理由写在 `ObsForegroundService.java` 的头注释里。
+On first launch, all missing permissions are requested in a single `requestPermissions` dialog. The foreground service type is a combined `specialUse|mediaProjection` — no second service, no second persistent notification; the rationale for choosing `specialUse` is documented in the header comments of `ObsForegroundService.java`.
 
-## 许可与归属
+## License and attribution
 
-- 上游 OBS Studio 采用 **GPL-2.0-or-later**，许可证全文见 `obs-studio/COPYING`，作者与第三方组件清单见 `obs-studio/AUTHORS`。本移植分支的全部新增代码沿用同一许可证。
-- 链接的 **Qt 6.9.3** 为 LGPLv3 / GPL 双许可；APK 中的 Qt 库以独立 `.so` 形式动态链接，满足重新链接要求。
-- `deps-android/` 会拉取并交叉编译 x264、FFmpeg、mbedTLS、curl、FreeType、libjpeg-turbo、speexdsp、rnnoise、libuvc 等，各自许可证以上游为准；分发包含这些二进制的构建产物前请自行核对。
+- Upstream OBS Studio is **GPL-2.0-or-later**; the full license text is in `obs-studio/COPYING`, and the list of authors and third-party components is in `obs-studio/AUTHORS`. All new code in this port uses the same license.
+- The linked **Qt 6.9.3** is dual-licensed LGPLv3 / GPL; the Qt libraries in the APK are dynamically linked as separate `.so` files, satisfying the relinking requirement.
+- `deps-android/` fetches and cross-compiles x264, FFmpeg, mbedTLS, curl, FreeType, libjpeg-turbo, speexdsp, rnnoise, libuvc, etc. — each under its own upstream license; check them yourself before distributing build artifacts that contain these binaries.
 
-## 范围之外
+## Out of scope
 
-竖屏布局不做——UI 只按横屏与 16:10 目标比例优化。
+No portrait layout — the UI is optimized for landscape only, targeting a 16:10 aspect ratio.
