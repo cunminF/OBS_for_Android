@@ -8,6 +8,10 @@
 
 ![OBS Studio 在 Android 真机上运行：屏幕采集递归预览](screenshot.png)
 
+RTMP 局域网直播实测——平板以约 6 Mbps / 30 FPS 推摄像头画面，后方显示器上是接收端播放的实时流：
+
+![真机直播测试：平板上的 OBS 通过局域网推 RTMP 流，后方显示器播放接收到的流](Live_Stream_Test.JPG)
+
 > **English (TL;DR)** — An Android port of OBS Studio 32.2.1. libobs, the OpenGL ES backend and the Qt frontend build and run as a native Android APK (`com.obsproject.studio`, minSdk 29 / targetSdk 35, arm64-v8a). Verified on a real device: scene preview with correct sRGB output, recording (mp4/mkv, x264 + AAC), Camera2 capture with front/back switching, MediaProjection screen capture (including recursive capture of OBS's own window), system audio capture into the mixer, and a foreground keep-alive service for long sessions. Landscape-only UI. GPL-2.0-or-later, same as upstream.
 
 ---
@@ -23,7 +27,7 @@
 | 屏幕采集源（MediaProjection + VirtualDisplay） | ✅ 已验证 | 真机实测，可递归采集 OBS 自身窗口 |
 | 系统内录（AudioPlaybackCapture） | ✅ 已验证 | 真机实测进混音器，录制有声 |
 | 前台保活服务（长时录制/推流不被杀） | ✅ 已验证 | 真机长时运行不被系统回收 |
-| 推流（RTMP） | ⚠️ 未在本轮回归 | 编译启用，但近期只回归了录制路径 |
+| 推流（RTMP） | ✅ 已验证 | 真机局域网直播实测（见下方照片） |
 
 ## 目录结构
 

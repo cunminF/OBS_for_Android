@@ -8,6 +8,10 @@ The goal is **an OBS on Android that can record, stream, and actually be used** 
 
 ![OBS Studio running on a real Android device: recursive screen-capture preview](screenshot.png)
 
+Live RTMP streaming test over LAN — the tablet streams its camera at ~6 Mbps / 30 FPS while the monitor behind plays the received stream:
+
+![Real-device live streaming test: OBS on a tablet pushing RTMP over LAN, received stream playing on the monitor behind](Live_Stream_Test.JPG)
+
 ---
 
 ## Status at a glance
@@ -21,7 +25,7 @@ The goal is **an OBS on Android that can record, stream, and actually be used** 
 | Screen capture source (MediaProjection + VirtualDisplay) | ✅ Verified | Tested on a real device; can recursively capture OBS's own window |
 | System audio capture (AudioPlaybackCapture) | ✅ Verified | Reaches the mixer on a real device; recordings have sound |
 | Foreground keep-alive service (survives long record/stream sessions) | ✅ Verified | Not reclaimed by the system during long runs on a real device |
-| Streaming (RTMP) | ⚠️ Not regressed this round | Enabled at compile time, but only the recording path has been regressed recently |
+| Streaming (RTMP) | ✅ Verified | Live LAN streaming test on a real device (photo below) |
 
 ## Repository layout
 
