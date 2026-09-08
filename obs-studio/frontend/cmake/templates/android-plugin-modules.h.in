@@ -1,0 +1,11 @@
+#pragma once
+
+/* 阶段 4 P-1：Android 启动时要装载的 OBS 插件模块名（.so 去后缀）。
+ *
+ * 由 frontend/cmake/os-android.cmake 用全局属性 OBS_MODULES_ENABLED 生成 —— 那份属性就是
+ * plugins/CMakeLists.txt 里 if(OS_ANDROID) 白名单建出来的 MODULE 目标清单，所以"打进 APK 的
+ * 插件"与"装载的插件"是同一个事实的两面，加/减插件只改白名单一处。
+ * 为什么需要这张表：见 OBSApp::loadAppModules() 里的 #ifdef __ANDROID__ 注释。 */
+static const char *const OBS_ANDROID_PLUGIN_MODULES[] = {
+@OBS_ANDROID_PLUGIN_MODULE_ENTRIES@
+};

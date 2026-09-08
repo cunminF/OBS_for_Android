@@ -1,0 +1,162 @@
+<?xml version="1.0"?>
+<!--
+  3-2 ②：OBS 前端的 APK 清单。
+  逐行抄自 android-shell/android/AndroidManifest.xml（那份是 M0~S1 一路验下来的），只改了四处：
+    * package —— 必须是**另一个**包名。壳的 org.qtproject.example.obs_shell 是 S1/A1~A4 的
+      回归载体，两个 APK 要能同时装在一台机器上互相印证，不能顶掉。
+    * android:label —— 同理，截图里要一眼分清是哪个。
+    * android.app.lib_name = obs —— 前端目标在 Android 上的产物是 libobs_<abi>.so
+      （OUTPUT_NAME 见 frontend/CMakeLists.txt:143 的 $<IF:$<PLATFORM_ID:Windows>,obs64,obs>，
+       _<abi>.so 那段后缀是 qt6_android_apply_arch_suffix 设的 SUFFIX）。
+    * android:screenOrientation = sensorLandscape —— 人工追加的要求：UI 只走横屏、不做竖屏，
+      按 16:10 目标屏幕比例优化。
+  权限集与壳一致：跑的是同一套 libobs + 同一批插件，RECORD_AUDIO 是 AAudio 采集的硬前提，
+  usb.host required=false 是为了不让没 OTG 的设备把包装不上。
+  注意：清单一旦被工程接管，androiddeployqt 的默认模板就不再覆盖它 —— 以后加权限改这里。
+
+  3-5 追加（前台保活）：FOREGROUND_SERVICE + FOREGROUND_SERVICE_SPECIAL_USE + WAKE_LOCK +
+  POST_NOTIFICATIONS，以及下面那个 <service> 的 foregroundServiceType/PROPERTY_SPECIAL_USE_FGS_SUBTYPE。
+  类型选 specialUse 的理由写在 ObsForegroundService.java 头注释里（microphone 要录音权限、
+  dataSync 有 6h 上限，都不合 OBS 的长推流；原文还有一句"mediaProjection 要 token"是错的，
+  同处已更正）。四处必须成套：manifest 的类型声明与两个 FOREGROUND_SERVICE* 权限缺任何一处，
+  API 34+ 的 startForeground 直接 SecurityException。
+
+  P-18-a 追加（09-07，屏幕采集授权与前台服务类型接线）三处，改一处不改另两处就是不一致：
+    1) 权限多一条 FOREGROUND_SERVICE_MEDIA_PROJECTION；
+    2) 那个 <service> 的类型从 specialUse 扩成 specialUse|mediaProjection（一个服务带两档，
+       不起第二个服务、不加第二条常驻通知）；
+    3) 多一个透明代理 Activity com.obsproject.studio.ObsProjectionHost，专门收
+       MediaProjection 的 onActivityResult —— 逐条理由写在它自己那段注释与那个 .java 的头注释里。
+  这一轮只接"授权与类型"这一条腿：还没有任何代码建 VirtualDisplay，所以装机后能验到的是
+  同意框起不起、令牌收不收得到、startForeground 换档时系统点不点头，验不到"屏幕画面进预览"。
+
+  真机第一条人工反馈追加（09-07 00:30，build 67 arm64-v8a）：activity 一直**没有** android:theme，
+  而 Qt 6.9.3 的默认模板也没有（aapt2 dump 出来的 APK 里同样查不到），所以用的是各 OEM 自己的平台
+  默认主题 —— 那台机器上的默认主题带 ActionBar，标题正是 android:label "OBS Studio (Android)"，
+  它画在铺满全屏的 Qt 面**之上**（不是把面往下顶）：截图 2000x1250 里顶部 0..185 是一条纯黑带、
+  白字在 y≈120-145，被选中的场景行只剩 31 px 蓝（同一张图里完整一行是 83 px），"场景" dock 的
+  标题行整个不见，而内容贴着右/下边缘 ⇒ 面本身是满屏的，被盖住了。⇒ 显式钉死
+  Theme.DeviceDefault.NoActionBar（平台主题，不引 AppCompat、不加 res/）。
+  **模拟器复现不了这条**（MuMu 那套系统默认主题本来就没 ActionBar），所以装机后只能证明"没弄坏"，
+  "修好了"要回真机再看一眼。
+
+  P-17 追加（09-07）：CAMERA 权限 + 成对的两条 uses-feature（android.hardware.camera 与
+  camera.any，都 required=false），给内置摄像头采集源用。camera 那条是被 b92 的 aapt dump
+  逼出来的 —— 光写 camera.any 时它仍被系统按权限隐含成 required，理由见下面那一处行内注释。
+  这一条是**改了早先的决定**：ObsPermissionHost.java 的头注释原来写着"相机属阶段 5，不进清单，
+  免得多挨一刀"，用户 09-07 拍定内置摄像头是需求不是可选项 ⇒ 提回队首，权限也就跟着进来。
+  多挨的那一刀是：首启那一次系统弹窗里从 2 项变 3 项（录音、通知、相机）—— 仍是一个框，
+  因为 requestStartup 把缺的都并成一次 requestPermissions。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.obsproject.studio"
+    android:installLocation="auto"
+    android:versionCode="1"
+    android:versionName="0.1.0">
+    <uses-permission android:name="android.permission.INTERNET"  />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"  />
+    <uses-permission android:name="android.permission.RECORD_AUDIO"  />
+    <!-- P-17：内置摄像头采集源（Camera2 NDK）。不申请这一条，ACameraManager_openCamera
+         直接失败，而失败原因是"没权限"却报成"打不开设备"，属性页里说不清楚。 -->
+    <uses-permission android:name="android.permission.CAMERA"  />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"  />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"  />
+    <!-- P-18-a：Android 14+ 要求"投影进行期间"由一个 mediaProjection 档的前台服务兜着，
+         而这一档要单独的权限（与下面 service 的类型声明成套，缺任何一处就是不一致）。
+         b109 已实测到缺这一档的后果（不是推定）：只报 specialUse 时换令牌当场抛
+           java.lang.SecurityException: Media projections require a foreground service of type
+           ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+         栈停在 MediaProjectionManager.getMediaProjection() —— 门在取令牌这一步，不在建 VirtualDisplay。
+         原文与处置抄在 ObsProjectionHost.takeToken 上方。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"  />
+    <uses-permission android:name="android.permission.WAKE_LOCK"  />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"  />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- camera.any = "有任何一个摄像头就行"。**光写这一条不够**：b92 的 aapt dump badging 实测到
+         申请了 CAMERA 权限之后，系统会**隐含**加一条 required 的 android.hardware.camera
+         （原话 uses-implied-feature: name='android.hardware.camera'
+          reason='requested android.permission.CAMERA permission'），
+         camera.any 上的 required=false 抵不掉它。不显式压掉的话，后果就是"没相机的设备被判定不兼容、
+         装不上 OBS"—— 恰好是 required=false 本来要防的那件事。⇒ 这两条必须成对出现，
+         缺 android.hardware.camera 那条是假绿：清单看着对，打出来的兼容性过滤器不是。 -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <supports-screens
+        android:anyDensity="true"
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="true" />
+    <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:hardwareAccelerated="true"
+        android:debuggable="true"
+        android:label="OBS Studio (Android)"
+        android:requestLegacyExternalStorage="true"
+        android:allowBackup="true"
+        android:fullBackupOnly="false">
+
+        <!-- 3-5：推流/录制期间的前台服务。exported=false —— 只由本进程的 native 桥起停。
+             人工用 am start-foreground-service 验证时要带 -n 且从 shell 起（shell 不受后台启动限制）。
+             P-18-a 把类型从单一 specialUse 扩成 specialUse|mediaProjection 两个：OBS 只有这一个保活服务
+             （开两个 = 两条常驻通知），所以它得同时代表"在编码上传"和"在投影"两格，实际用哪一档由
+             ObsForegroundService.promoteToForeground() 按当时的令牌态现算。清单这里是**上界**：
+             少声明一位，startForeground 传那个位就 SecurityException；多声明一位不做事不会用到。 -->
+        <service
+            android:name="com.obsproject.studio.ObsForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|mediaProjection">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="OBS Studio 推流/录制期间的编码与上传保活" />
+        </service>
+
+        <!-- P-18-a：屏幕采集同意的透明代理 Activity（见 ObsProjectionHost.java 头注释：MediaProjection
+             是一次性 token、没有可查状态，所以必须真有一个收得到 onActivityResult 的地方，
+             而不能照抄 ObsPermissionHost 那套"只弹框、结果靠现读"）。
+             exported=false —— 只由本进程 startActivity 拉起；人工冒烟时 root 的 am start 照样能起。
+             Translucent.NoTitleBar：它自己一帧都不画，同意框是系统的那个 Activity。
+             excludeFromRecents：代理活动不该出现在最近任务里（用户只见 OBS 一个入口）。
+             不开 noHistory：我本来想加，但那会让"活动已离场"与"结果正在送达"两件事的先后
+             变成要靠运气，而每条路径都已经自己 finish() 了，收益为零、风险不为零 ⇒ 去掉。
+             screenOrientation 跟着主界面钉成 sensorLandscape（人工定的口径：只做横屏）。 -->
+        <activity
+            android:name="com.obsproject.studio.ObsProjectionHost"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="sensorLandscape" />
+
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:label="OBS Studio (Android)"
+            android:launchMode="singleTop"
+            android:screenOrientation="sensorLandscape"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+          <meta-data
+                android:name="android.app.lib_name"
+                android:value="obs" />
+
+          <meta-data
+                android:name="android.app.arguments"
+                android:value="" />
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.qtprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/qtprovider_paths"/>
+        </provider>
+    </application>
+</manifest>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 要的 paths 资源，内容与 Qt 模板一致（同 android-shell/android/res/xml/）。
+     清单一旦被工程自带，这个资源也必须自带，否则 aapt 报 @xml/qtprovider_paths 找不到。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- For getFilesDirectory() -->
+    <files-path name="files_path" path="/"/>
+    <!-- For getExternalStorageDirectory() -->
+    <external-path name="external_path" path="/"/>
+    <!-- For getExternalFilesDir() -->
+    <external-files-path name="external_files_path" path="/"/>
+    <!-- For getExternalCacheDir() -->
+    <external-cache-path name="external_cache_path" path="/"/>
+</paths>

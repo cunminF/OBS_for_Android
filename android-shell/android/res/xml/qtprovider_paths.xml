@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 清单从 Qt 模板换成工程自带后，@xml/qtprovider_paths 这个资源也得自带（内容与 Qt 模板一致）。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- For getFilesDirectory() -->
+    <files-path name="files_path" path="/"/>
+    <!-- For getExternalStorageDirectory() -->
+    <external-path name="external_path" path="/"/>
+    <!-- For getExternalFilesDir() -->
+    <external-files-path name="external_files_path" path="/"/>
+    <!-- For getExternalCacheDir() -->
+    <external-cache-path name="external_cache_path" path="/"/>
+</paths>

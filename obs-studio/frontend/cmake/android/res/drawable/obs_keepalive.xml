@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  3-5 前台服务通知的小图标。状态栏图标会被系统按 alpha 通道抠成单色剪影，所以只画形状不画颜色：
+  外圈填白 + 内圈留空 = 一个"正在录制"式的圆环。
+  用 vector 而不是 png：minSdk 29（≥21 原生支持 vector），不必为各 dpi 铺一套图，
+  也不必往 APK 里塞二进制资源。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M12,3 A9,9 0 1,0 12,21 A9,9 0 1,0 12,3 Z M12,7 A5,5 0 1,0 12,17 A5,5 0 1,0 12,7 Z" />
+</vector>

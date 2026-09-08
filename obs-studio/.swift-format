@@ -1,0 +1,23 @@
+{
+    "version": 1,
+    "lineLength": 120,
+    "indentation": {
+        "spaces": 4
+    },
+    "tabWidth": 4,
+    "maximumBlankLines": 1,
+    "respectsExistingLineBreaks": true,
+    "lineBreakBeforeControlFlowKeywords": false,
+    "lineBreakBeforeEachArgument": false,
+    "lineBreakBeforeEachGenericRequirement": false,
+    "lineBreakBetweenDeclarationAttributes": false,
+    "prioritizeKeepingFunctionOutputTogether": false,
+    "indentConditionalCompilationBlocks": true,
+    "lineBreakAroundMultilineExpressionChainComponents": false,
+    "fileScopedDeclarationPrivacy": {"accessLevel": "private"},
+    "indentSwitchCaseLabels": false,
+    "spacesAroundRangeFormationOperators": false,
+    "noAssignmentInExpressions": { "allowedFunctions" : ["XCTAssertNoThrow"] },
+    "multiElementCollectionTrailingCommas": true,
+    "indentBlankLines": false,
+}

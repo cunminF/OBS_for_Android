@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<!--
+  阶段 2 起需要运行时权限，所以壳的清单从"androiddeployqt 自动生成"改成"工程自带"。
+  以 Qt 6.9.3 + androiddeployqt 在 M0~M3 生成的那份为基准逐行抄写，只加了下面按里程碑标注的几项：
+    * RECORD_AUDIO          —— AAudio 打开输入流的硬前提。没授权时 AAudioStreamBuilder_openStream
+                               直接失败，日志里能看到具体错误码（区别于"设备没麦克风"）。
+    * microphone required=false —— 别把没麦克风的设备（部分模拟器/盒子）挡在应用商店外面。
+    * usb.host              —— A3 的 UsbManager 宿主（枚举/授权/openDevice）。
+  注意：清单一旦被工程接管，Qt 的默认模板就不再覆盖它 —— 以后加权限要改这里，
+  改 build-x86_*/android-build/ 下的副本会被下次构建覆盖掉。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.qtproject.example.obs_shell"
+    android:installLocation="auto"
+    android:versionCode="1"
+    android:versionName="0.1.0">
+    <uses-permission android:name="android.permission.INTERNET"  />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"  />
+    <!-- A1：AAudio 采集输入 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"  />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <!-- A3：USB 摄像头/声卡走的是 UsbManager（无 root），不需要 uses-permission，
+         但要把 usb.host 特性声明出来；required=false —— 模拟器与没 OTG 的机器不能装不上。
+         真机上还要 res/xml/device_filter.xml + activity 的 USB_DEVICE_ATTACHED intent-filter
+         才能"插上就弹授权"，那一步等 OTG 真机一起做（plan.md 8.8 第 10 项）。 -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <supports-screens
+        android:anyDensity="true"
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="true" />
+    <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:hardwareAccelerated="true"
+        android:label="obs-shell"
+        android:requestLegacyExternalStorage="true"
+        android:allowBackup="true"
+        android:fullBackupOnly="false">
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:label="obs-shell"
+            android:launchMode="singleTop"
+            android:screenOrientation="unspecified"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+          <meta-data
+                android:name="android.app.lib_name"
+                android:value="obs-shell" />
+
+          <meta-data
+                android:name="android.app.arguments"
+                android:value="" />
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.qtprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/qtprovider_paths"/>
+        </provider>
+    </application>
+</manifest>

@@ -1,0 +1,23 @@
+# 本地构建与取证缓存
+.qoder/
+build-fe-*/
+aqtinstall.log
+
+# 不上传的内容
+docs/
+releases/
+prebuilt/
+scripts/setup-env.ps1
+scripts/build-frontend-apk.sh
+
+# 依赖的下载物与编译产物（由 deps-android/fetch.sh + build.sh 再生）
+deps-android/src/
+deps-android/prebuilt/
+
+# 二进制暂存/安装树（构建产物，构建脚本会再生）
+obs-studio/frontend/cmake/android/libs/
+android-shell/obs/
+
+# 通用
+*.log
+.DS_Store
