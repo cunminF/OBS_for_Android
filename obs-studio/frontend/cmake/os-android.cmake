@@ -24,6 +24,9 @@ target_sources(
     widgets/OBSAndroidKeepAlive.cpp
     # 3-5：一期运行时权限申请（Java 侧 .../ObsPermissionHost.java）。
     widgets/OBSAndroidPermissions.cpp
+    # USB host 总线（obs_android_usb_*）的前端注册（Java 侧 .../ObsUsbHost.java，
+    # 自 android-shell/obs_usb_host.cpp 移植），给 android-capture 的 UVC 源用。
+    widgets/OBSAndroidUsb.cpp
     # 3-4：桌面 "openUrl(本地路径)" 的 Android 替代（显示路径 + 复制剪贴板）。
     widgets/OBSAndroidPath.cpp
 )

@@ -205,10 +205,12 @@ public final class ObsUsbHost {
         }
         UsbDeviceConnection existing = connections.get(name);
         if (existing != null) {
-            int fd = existing.getFileDescriptor();
-            if (fd >= 0)
-                return fd;
-            connections.remove(name); /* 连接已经废了（设备被拔过），丢掉重开 */
+            /* 节点号会被内核复用：缓存连接可能属于拔掉前的旧设备实例，fd 看着活着其实
+             * 是死的（真机症状：描述符能读、GET probe 永远 -1）。一律关旧开新，
+             * 死 fd 绝不往 native 递。 */
+            Log.w(TAG, "openFd(" + name + ")：关闭缓存连接（fd=" + existing.getFileDescriptor() + "）重开，防拔插后的死 fd");
+            connections.remove(name);
+            existing.close();
         }
         if (connections.size() >= MAX_CONNECTIONS) {
             Log.e(TAG, "openFd(" + name + ")：连接数已达上限 " + MAX_CONNECTIONS + "，拒绝再开");
@@ -252,12 +254,18 @@ public final class ObsUsbHost {
         Log.i(TAG, "closeFd(" + fd + ") 已关闭 " + key);
     }
 
-    /** 设备拔了要把连接丢掉，否则 fd 悬在表里，下次同名 open 会拿到坏 fd。 */
+    /** 设备拔了要把连接关掉再丢，否则 fd 漏在表里（设备已拔，native 的 closeFd 再也找不到它）。 */
     private static synchronized void dropDisconnected() {
         if (manager == null)
             return;
         HashMap<String, UsbDevice> present = manager.getDeviceList();
-        connections.entrySet().removeIf(e -> !present.containsKey(e.getKey()));
+        connections.entrySet().removeIf(e -> {
+            if (present.containsKey(e.getKey()))
+                return false;
+            e.getValue().close();
+            Log.i(TAG, "dropDisconnected：关闭并移除 " + e.getKey());
+            return true;
+        });
     }
 
     private static final class UsbReceiver extends BroadcastReceiver {
@@ -284,8 +292,11 @@ public final class ObsUsbHost {
                  * 平时测不出来，所以按 SDK_INT 分派。 */
                 UsbDevice d = Build.VERSION.SDK_INT >= 33 ? intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice.class)
                                                           : intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-                if (d != null)
-                    connections.remove(d.getDeviceName());
+                if (d != null) {
+                    UsbDeviceConnection conn = connections.remove(d.getDeviceName());
+                    if (conn != null)
+                        conn.close(); /* 只 remove 不 close 会漏 fd */
+                }
             }
             dropDisconnected();
             Log.i(TAG, "收到广播 " + action + "（热插拔计数 " + hotplugEvents + "，当前设备数 "

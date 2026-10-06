@@ -29,6 +29,7 @@
 #include "OBSAndroidDisplay.hpp" // 3-4 校形探针日志（logcat tag OBS-display）
 #include "OBSAndroidKeepAlive.hpp"
 #include "OBSAndroidPermissions.hpp"
+#include "OBSAndroidUsb.hpp" // USB host 总线注册（logcat tag OBS-usb）
 #include <QListView> // 3-4 命中区：列表行高
 #include <QToolBar> // 3-4 命中区：场景/源两排工具按钮
 #include <QToolButton>
@@ -389,6 +390,11 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	/* P-18-a：屏幕采集同意总线同一批接线（obs_android_screen_* 的两格）。它不弹框，只是把
 	 * "问令牌/要令牌"两条腿插进 libobs，等采集源插件来问；Java 那边对应 ObsProjectionHost。 */
 	obsAndroidPermissionsRegisterScreenBus();
+
+	/* USB host 总线同一批接线（obs_android_usb_* 的四格，自 android-shell 移植）。不弹框，
+	 * 只是把"枚举/授权/open_fd/close_fd"插进 libobs，等 android-capture 的 UVC 源来问；
+	 * Java 那边对应 ObsUsbHost。USB 授权框是后来属性页按需弹的（异步），不在这里弹。 */
+	obsAndroidUsbRegisterBus();
 
 	/* 3-5 第 3 项：运行时权限批量申请（RECORD_AUDIO + POST_NOTIFICATIONS + CAMERA，第三项是 P-17
 	 * 加进来的）。已在 Java 侧做过"缺了才弹"，每次都调这一句是安全的。 */
