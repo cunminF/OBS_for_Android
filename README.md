@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README_CN.md)
 
-A working branch porting [OBS Studio](https://github.com/obsproject/obs-studio) to Android. The current baseline is upstream **32.2.1** (commit `57bfcf10a`), on top of which this repo provides: the `libobs` Android platform layer, a GLES/EGL rendering backend, Android adaptation of the Qt frontend, four `android-*` capture plugins, and the Java host on the APK side.
+A working branch porting [OBS Studio](https://github.com/obsproject/obs-studio) to Android. The current baseline is upstream **32.2.1** (commit `57bfcf10a`), on top of which this repo provides: the `libobs` Android platform layer, a GLES/EGL rendering backend, Android adaptation of the Qt frontend, four `android-*` capture plugins, USB host capture sources (PTP for Nikon Z bodies, UVC for webcams/HDMI capture cards), and the Java host on the APK side.
 
 The goal is **an OBS on Android that can record, stream, and actually be used** — not a demo. All development and verification is done on **WSL2 + a real arm64 device**.
 
@@ -22,10 +22,30 @@ Live RTMP streaming test over LAN — the tablet streams its camera at ~6 Mbps /
 | Preview, scenes, sources, filter panels | ✅ Verified | Landscape only, laid out for 16:10; sRGB window surface, colors match the system |
 | Recording (mp4/mkv, x264 + AAC) | ✅ Verified | Recorded files have valid video/audio tracks |
 | Built-in camera source (Camera2 NDK) | ✅ Verified | Tested on a real device, with one-tap front/back switching on the main UI |
+| Nikon Webcam source (Z series, self-implemented PTP) | ✅ Verified | Real Z8: 1024×576 @ ~55 fps, 22 min continuous, zero dropped frames |
+| UVC camera / HDMI capture card source (self-implemented UVC-over-libusb) | ✅ Verified | UGREEN 95348 (2b89:5348), YUYV 1280×720@60 stable (~56 fps measured) |
 | Screen capture source (MediaProjection + VirtualDisplay) | ✅ Verified | Tested on a real device; can recursively capture OBS's own window |
 | System audio capture (AudioPlaybackCapture) | ✅ Verified | Reaches the mixer on a real device; recordings have sound |
 | Foreground keep-alive service (survives long record/stream sessions) | ✅ Verified | Not reclaimed by the system during long runs on a real device |
 | Streaming (RTMP) | ✅ Verified | Live LAN streaming test on a real device (photo below) |
+
+## USB capture sources (OTG)
+
+Both ride the frontend's USB host bus (the Java side opens the device and hands the fd down to libobs) — no root needed.
+
+### Nikon Webcam (Z series)
+
+- Source id `nikon_webcam_input`. Speaks **self-implemented PTP** directly to Nikon Z-series bodies — **no Nikon SDK required** (the official SDK ships for Windows/macOS only).
+- Camera side: just set USB to MTP/PTP mode. Verified on a real Z8: **1024×576 @ ~55 fps, 22 minutes continuous, zero dropped frames**.
+- Limits: in photo mode Live View is 1024×768 (4:3, untested); while the app holds the camera, other hosts (e.g. a PC) cannot reach it; the Z8 has no UVC mode, so the UVC source below cannot use it directly.
+
+### UVC camera (Android USB)
+
+- Source id `android_video_input`, listed as "UVC 摄像头（Android USB）". **Rewritten from scratch as self-implemented UVC-over-libusb** — libuvc's init is denied by SELinux on Android. Device enumeration, permission, detaching the kernel `uvcvideo` driver, format negotiation, an asynchronous bulk-read pipeline, and error self-healing are all handled in-house.
+- Verified: **UGREEN 95348 HDMI capture card (2b89:5348), YUYV 1280×720@60 stable** (~56 fps measured) — works with a camera's HDMI output.
+- Quirks & self-healing: a quirks table (2b89:5348's MJPEG/NV12 outputs are a full black field — a firmware defect, also reproducible on Windows — so YUYV is preferred automatically); any card outputting black frames for 3 s is auto-downgraded to YUYV; a freeze watchdog renegotiates a stalled stream; unplug/replug recovers by itself.
+- Resolution: the ceiling depends on both the device and the host — YUYV 1080p60 needs a sustained **250 MB/s** (trivial for PCs, but phones/tablets generally can't keep up and the stream freezes). **For 1080p and above, prefer a capture card with a healthy MJPEG path** (MJPEG 1080p60 is only ~10–20 MB/s, mobile-friendly). The source accepts up to the device-reported 4K.
+- For Z8 owners: the Z8 has no UVC mode — "Z8 as webcam" goes through an HDMI capture card (this source) or the PTP source above.
 
 ## Repository layout
 
@@ -95,7 +115,7 @@ adb connect <phone-IP>:<port>      # On the phone: Developer options → Wireles
 adb install -r releases/OBS-Android-arm64-v8a-wsl-<timestamp>.apk
 ```
 
-Enabled modules: `android-audio` `android-camera` `android-capture` `android-screen` `image-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`. Disabled: scripting, Idian Playground, Restream/Twitch/YouTube API integrations.
+Enabled modules: `android-audio` `android-camera` `android-capture` `android-screen` `image-source` `nikon-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`. Disabled: scripting, Idian Playground, Restream/Twitch/YouTube API integrations.
 
 ### 3. When you only changed one .cpp
 

@@ -2,7 +2,7 @@
 
 **[English](README.md)** | 简体中文
 
-把 [OBS Studio](https://github.com/obsproject/obs-studio) 移植到 Android 的工作分支。当前基线是上游 **32.2.1**（commit `57bfcf10a`），在其之上提供：`libobs` 的 Android 平台层、GLES/EGL 渲染后端、Qt 前端的 Android 适配、四个 `android-*` 采集插件，以及 APK 侧的 Java 宿主。
+把 [OBS Studio](https://github.com/obsproject/obs-studio) 移植到 Android 的工作分支。当前基线是上游 **32.2.1**（commit `57bfcf10a`），在其之上提供：`libobs` 的 Android 平台层、GLES/EGL 渲染后端、Qt 前端的 Android 适配、四个 `android-*` 采集插件、USB host 采集源（Nikon Z 系列走 PTP、摄像头/HDMI 采集卡走 UVC），以及 APK 侧的 Java 宿主。
 
 目标是**能录、能推、能用的安卓端 OBS**，而不是演示品。开发与验证全部在 **WSL2 + arm64 真机** 上进行。
 
@@ -12,7 +12,7 @@ RTMP 局域网直播实测——平板以约 6 Mbps / 30 FPS 推摄像头画面�
 
 ![真机直播测试：平板上的 OBS 通过局域网推 RTMP 流，后方显示器播放接收到的流](Live_Stream_Test.JPG)
 
-> **English (TL;DR)** — An Android port of OBS Studio 32.2.1. libobs, the OpenGL ES backend and the Qt frontend build and run as a native Android APK (`com.obsproject.studio`, minSdk 29 / targetSdk 35, arm64-v8a). Verified on a real device: scene preview with correct sRGB output, recording (mp4/mkv, x264 + AAC), Camera2 capture with front/back switching, MediaProjection screen capture (including recursive capture of OBS's own window), system audio capture into the mixer, and a foreground keep-alive service for long sessions. Landscape-only UI. GPL-2.0-or-later, same as upstream.
+> **English (TL;DR)** — An Android port of OBS Studio 32.2.1. libobs, the OpenGL ES backend and the Qt frontend build and run as a native Android APK (`com.obsproject.studio`, minSdk 29 / targetSdk 35, arm64-v8a). Verified on a real device: scene preview with correct sRGB output, recording (mp4/mkv, x264 + AAC), Camera2 capture with front/back switching, MediaProjection screen capture (including recursive capture of OBS's own window), system audio capture into the mixer, and a foreground keep-alive service for long sessions. USB host capture is also verified: a self-implemented PTP source for Nikon Z bodies, and a rewritten UVC source for webcams/HDMI capture cards. Landscape-only UI. GPL-2.0-or-later, same as upstream.
 
 ---
 
@@ -24,10 +24,30 @@ RTMP 局域网直播实测——平板以约 6 Mbps / 30 FPS 推摄像头画面�
 | 预览、场景、来源、滤镜面板 | ✅ 已验证 | 横屏专用，按 16:10 布局；sRGB 窗口面，颜色与系统一致 |
 | 录制（mp4/mkv，x264 + AAC） | ✅ 已验证 | 录出的文件视频/音频轨正常 |
 | 内置摄像头采集源（Camera2 NDK） | ✅ 已验证 | 真机实测，含主界面一键前后置切换 |
+| Nikon Webcam 源（Z 系列，自实现 PTP） | ✅ 已验证 | 真机 Z8：1024×576 @ ~55fps，22 分钟连续零丢帧 |
+| UVC 摄像头/HDMI 采集卡源（自实现 UVC-over-libusb） | ✅ 已验证 | UGREEN 95348（2b89:5348），YUYV 1280×720@60 稳定（实测 ~56fps） |
 | 屏幕采集源（MediaProjection + VirtualDisplay） | ✅ 已验证 | 真机实测，可递归采集 OBS 自身窗口 |
 | 系统内录（AudioPlaybackCapture） | ✅ 已验证 | 真机实测进混音器，录制有声 |
 | 前台保活服务（长时录制/推流不被杀） | ✅ 已验证 | 真机长时运行不被系统回收 |
 | 推流（RTMP） | ✅ 已验证 | 真机局域网直播实测（见下方照片） |
+
+## USB 采集源（OTG）
+
+两个源都跑在前端新增的 USB host 总线上（Java 侧打开设备，fd 传给 libobs），不需要 root。
+
+### Nikon Webcam（Z 系列）
+
+- 源 id `nikon_webcam_input`，以**自实现的 PTP 协议**直连 Nikon Z 系列机身，**不需要 Nikon 官方 SDK**（SDK 只有 Windows/macOS 版）。
+- 相机端 USB 设为 MTP/PTP 模式即可。真机 Z8 验证：**1024×576 @ ~55fps，22 分钟连续零丢帧**。
+- 限制：拍照模式下 Live View 为 1024×768（4:3，未实测）；App 独占相机期间其它主机（如 PC）访问不到该相机；Z8 没有 UVC 模式，下面的 UVC 源用不了它。
+
+### UVC 摄像头（Android USB）
+
+- 源 id `android_video_input`，源列表里显示为「UVC 摄像头（Android USB）」。**整体重写为自实现的 UVC-over-libusb**——libuvc 的初始化在 Android 上被 SELinux 拒绝。设备枚举、授权、内核 uvcvideo 驱动 detach、格式协商、异步流水线采集、错误自愈全部自己完成。
+- 真机验证：**UGREEN 95348 HDMI 采集卡（2b89:5348），YUYV 1280×720@60 稳定**（实测 ~56fps），可接相机 HDMI 输出采集。
+- 怪癖与自愈：quirks 表（2b89:5348 的 MJPEG/NV12 输出全帧黑场属固件缺陷，Windows 上同样复现 → 自动偏好 YUYV）；任何卡黑场 3 秒自动降级 YUYV；冻结看门狗会把停滞的流重新协商；拔插自愈。
+- 分辨率说明：上限取决于设备与主机——YUYV 1080p60 需主机持续 **250MB/s**（PC 无压力，平板/手机类普遍吃力、会冻结）；**想要 1080p 及以上建议选用 MJPEG 通路正常的采集卡**（MJPEG 1080p60 仅需 ~10-20MB/s，移动设备友好）。源最高支持到设备自报的 4K。
+- Z8 用户须知：Z8 本身无 UVC 模式，"Z8 当 webcam" 需经 HDMI 采集卡（本源）或上面的 PTP 源。
 
 ## 目录结构
 
@@ -90,7 +110,7 @@ adb connect <手机IP>:<端口>      # 手机开发者选项 → 无线调试
 adb install -r releases/OBS-Android-arm64-v8a-wsl-<时间戳>.apk
 ```
 
-启用的模块：`android-audio` `android-camera` `android-capture` `android-screen` `image-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`。禁用：脚本引擎、Idian Playground、Restream/Twitch/YouTube API 连接。
+启用的模块：`android-audio` `android-camera` `android-capture` `android-screen` `image-source` `nikon-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`。禁用：脚本引擎、Idian Playground、Restream/Twitch/YouTube API 连接。
 
 ### 3. 只想改一个 .cpp 时
 
