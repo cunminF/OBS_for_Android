@@ -112,6 +112,29 @@ adb install -r releases/OBS-Android-arm64-v8a-wsl-<时间戳>.apk
 
 启用的模块：`android-audio` `android-camera` `android-capture` `android-screen` `image-source` `nikon-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`。禁用：脚本引擎、Idian Playground、Restream/Twitch/YouTube API 连接。
 
+#### 正式发布构建
+
+默认命令仍生成使用 debug key 签名的开发包。正式发布时，使用自己的 keystore（保存在仓库外），并设置全部四个签名变量：
+
+```bash
+export ANDROID_RELEASE_KEYSTORE="$HOME/.android/obs-release.p12"
+export ANDROID_RELEASE_KEY_ALIAS=obs-release
+read -rsp 'Keystore password: ' ANDROID_RELEASE_STORE_PASSWORD; echo
+read -rsp 'Key password: ' ANDROID_RELEASE_KEY_PASSWORD; echo
+export ANDROID_RELEASE_STORE_PASSWORD ANDROID_RELEASE_KEY_PASSWORD
+bash scripts/build-frontend-apk-wsl.sh release
+```
+
+`release` 使用独立目录 `build-fe-arm64-v8a-plugins-release/` 和 `CMAKE_BUILD_TYPE=Release`，在构建目录中暂存 `android:debuggable="false"` 的包源，不修改开发用清单。构建前会拒绝缺失的签名变量、无法读取的 keystore、仓库中的 debug 证书（复制文件或修改别名也不能绕过），以及 `CN=Android Debug` 的证书。口令通过环境变量交给签名工具。
+
+APK 始终使用指定密钥重新签名。归档前，脚本用 `aapt2 dump badging` 检查 **APK 内的清单**，并执行 `apksigner verify --verbose --print-certs`。可调试 APK、无效签名、签名证书不匹配或检查工具失败都会终止构建。通过检查的产物才会归档到 `releases/OBS-Android-arm64-v8a-wsl-release-<时间戳>.apk`。
+
+无需构建 OBS 即可运行安全检查集成测试：安装 JDK 17、Python 3、SDK build-tools 36.0.0 和 platform android-35，设置 `JAVA_HOME`、`ANDROID_SDK_ROOT`，然后运行：
+
+```bash
+bash scripts/tests/test-apk-release-checks.sh
+```
+
 ### 3. 只想改一个 .cpp 时
 
 不要等整轮 Gradle/ninja。从 `build.ninja` 里把**原样**那条编译命令抄出来（含 `-Werror` 与全部 `-D`/`-I`），加 `-fsyntax-only` 当场判：
@@ -124,9 +147,9 @@ ninja -C build-fe-arm64-v8a-plugins -t commands plugins/android-screen/CMakeFile
 
 1. **Gradle 8.12/8.14 不支持 JDK 25**（class file major version 69）。必须显式把 `JAVA_HOME` 钉到 JDK 17。
 2. **GitHub 在 WSL 内不可直连**，要走宿主机的代理：宿主代理客户端需开"允许局域网连接"，且 Windows 防火墙要放行对应端口的入站（WSL 子网算外部网络）。`fetch.sh` 按域名自动加代理（`OBS_PROXY` 环境变量可覆盖）。注意 WSL 重启后宿主 IP 可能变，`ip route | awk '/default/{print $3}'` 拿当前值。
-3. **Release 模式下 `androiddeployqt` 不签名**，脚本用 `apksigner` 自签。仓库里的 `android-shell/debug.keystore` 是 Android 标准 debug key（别名 `androiddebugkey`、口令 `android`），仅供本地开发。
+3. **Release 模式下 `androiddeployqt` 不签名**，脚本用 `apksigner` 自签。默认构建使用 `android-shell/debug.keystore`（别名 `androiddebugkey`、口令 `android`），仅供本地开发。正式发布请使用显式的 `release` 命令和自己的签名变量。
 4. **插件 `.so` 要手工暂存进 `libs/<abi>/` 并清掉 gradle 的 native 中间件**，否则新编出的插件不进包，测的还是上一版——`build-frontend-apk-wsl.sh` 里那段"强制重打包"就是为这个。判据一律取 **APK 里那份**，不取 rundir。
-5. **OBS 的 `blog()` 不进 logcat。** 日志在设备上 `/data/user/0/com.obsproject.studio/files/.config/obs-studio/logs/*.txt`。APK 清单带 `android:debuggable="true"`，非 root 真机用 `adb exec-out run-as com.obsproject.studio cat ...` 即可读取——**出正式发布包前记得把这个属性摘掉**。
+5. **OBS 的 `blog()` 不进 logcat。** 日志在设备上 `/data/user/0/com.obsproject.studio/files/.config/obs-studio/logs/*.txt`。开发 APK 清单带 `android:debuggable="true"`，非 root 真机用 `adb exec-out run-as com.obsproject.studio cat ...` 即可读取。显式的 `release` 命令会在暂存清单中禁用此属性，并在归档前拒绝可调试 APK。
 6. **判断产物身份只能看内容**（哈希 / `strings` / 行为），不能看文件大小或修改时间。
 
 ## 权限清单（运行时/清单声明）

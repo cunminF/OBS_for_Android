@@ -3,6 +3,7 @@
 #
 #   bash scripts/build-frontend-apk-wsl.sh            构建 + 签名 + 校验
 #   bash scripts/build-frontend-apk-wsl.sh configure  只跑 CMake configure（快速验证 CMake 改动）
+#   bash scripts/build-frontend-apk-wsl.sh release    Release APK + mandatory safety checks
 #
 # 与 Windows 版的差异：
 #   - 路径全部在 WSL home（~/obsd），无 AGP 非 ASCII 路径问题，无需 /d/obsd 联接
@@ -12,6 +13,10 @@
 set -uo pipefail
 
 ACT="${1:-build}"
+case "$ACT" in
+  build|configure|release) ;;
+  *) echo "Usage: $0 [build|configure|release]" >&2; exit 1 ;;
+esac
 API="${API:-29}"
 ABI=arm64-v8a
 ROOT="$HOME/OBS_for_Android"
@@ -34,6 +39,19 @@ export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}"
 command -v cmake >/dev/null || { echo "FATAL: PATH 里没有 cmake（venv 没生效？）" >&2; exit 1; }
 
 BUILD_DIR="$ROOT/build-fe-$ABI-plugins"
+BUILD_TYPE=RelWithDebInfo
+RELEASE=OFF
+if [ "$ACT" = release ]; then
+  BUILD_DIR="$BUILD_DIR-release"
+  BUILD_TYPE=Release
+  RELEASE=ON
+  APKSIGNER="$SDK/build-tools/36.0.0/apksigner"
+  [ -f "$APKSIGNER" ] || APKSIGNER="$SDK/build-tools/34.0.0/apksigner"
+  AAPT2="$SDK/build-tools/36.0.0/aapt2"
+  [ -f "$AAPT2" ] || AAPT2="$SDK/build-tools/34.0.0/aapt2"
+  . "$(dirname "${BASH_SOURCE[0]}")/apk-release-checks.sh" || exit 1
+  release_preflight || exit 1
+fi
 LOGDIR="$ROOT/.qoder"
 mkdir -p "$LOGDIR"
 LOG="${LOG:-$LOGDIR/fe-$ABI-apk-build-wsl.log}"
@@ -58,7 +76,8 @@ cmake -S "$ROOT/obs-studio" -B "$BUILD_DIR" -G Ninja \
   -DANDROID_ABI="$ABI" \
   -DANDROID_PLATFORM="android-$API" \
   -DANDROID_STL=c++_shared \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+  -DOBS_ANDROID_RELEASE="$RELEASE" \
   -DCMAKE_PREFIX_PATH="$ROOT/deps-android/prebuilt/$ABI;$QT/android_arm64_v8a" \
   -DQT_HOST_PATH="$HOST" \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
@@ -83,6 +102,9 @@ grep -E "error:|fatal error|FAILED:" "$LOG" | head -30
 
 # ---- 插件暂存进包源目录（同 Windows 版的理由：否则新插件不进 APK） ----
 PKG_LIBS="$ROOT/obs-studio/frontend/cmake/android/libs/$ABI"
+if [ "$ACT" = release ]; then
+  PKG_LIBS="$BUILD_DIR/frontend/android-package-source/libs/$ABI"
+fi
 PLUG_SRC=$(find "$BUILD_DIR/rundir" -type d -path '*/lib/obs-plugins' 2>/dev/null | head -1)
 if [ -n "$PLUG_SRC" ]; then
   mkdir -p "$PKG_LIBS"
@@ -135,12 +157,18 @@ fi
 
 # ---- 签名 ----
 APK=$(find "$BUILD_DIR" -path "*build/outputs/apk/release/*-unsigned.apk" 2>/dev/null | head -1)
-[ -n "$APK" ] || APK=$(find "$BUILD_DIR" -path "*build/outputs/apk/*.apk" ! -name '*-signed*.apk' 2>/dev/null | head -1)
+if [ "$ACT" != release ]; then
+  [ -n "$APK" ] || APK=$(find "$BUILD_DIR" -path "*build/outputs/apk/*.apk" ! -name '*-signed*.apk' 2>/dev/null | head -1)
+fi
 [ -n "$APK" ] || { echo "FATAL: 未找到生成的 APK"; exit 1; }
 
 APKSIGNER="$SDK/build-tools/36.0.0/apksigner"
 [ -f "$APKSIGNER" ] || APKSIGNER="$SDK/build-tools/34.0.0/apksigner"
-if ! "$APKSIGNER" verify "$APK" >/dev/null 2>&1; then
+if [ "$ACT" = release ]; then
+  SIGNED="${APK%.apk}-signed.apk"
+  release_sign_apk "$APK" "$SIGNED" || exit 1
+  APK="$SIGNED"
+elif ! "$APKSIGNER" verify "$APK" >/dev/null 2>&1; then
   echo "=== 签名 $(basename "$APK") ==="
   SIGNED="$(dirname "$APK")/$(basename "${APK%.apk}")-signed.apk"
   cp -f "$APK" "$SIGNED"
@@ -164,7 +192,10 @@ AAPT2="$SDK/build-tools/36.0.0/aapt2"
 REL="$ROOT/releases"
 mkdir -p "$REL"
 STAMP=$(date '+%m%d-%H%M')
-cp -f "$APK" "$REL/OBS-Android-$ABI-wsl-$STAMP.apk"
+if [ "$ACT" = release ]; then
+  STAMP="release-$STAMP"
+fi
+cp -f "$APK" "$REL/OBS-Android-$ABI-wsl-$STAMP.apk" || exit 1
 echo "=== 已归档: $REL/OBS-Android-$ABI-wsl-$STAMP.apk ==="
 md5sum "$APK" "$REL/OBS-Android-$ABI-wsl-$STAMP.apk"
 echo "########## 完成 $(date '+%F %T') ##########"
