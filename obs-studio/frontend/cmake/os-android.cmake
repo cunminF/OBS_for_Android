@@ -172,13 +172,24 @@ endif()
 # 插件 .so 不进 EXTRA_LIBS（名字不以 lib 开头，androiddeployqt 会要求改名），而是由
 # .qoder/build-frontend-apk.sh 把 rundir/lib/obs-plugins/*.so 暂存到本目录的 libs/<abi>/，
 # 走 androiddeployqt 的 android-package-source-directory → gradle jniLibs 那条路进 APK。
+option(OBS_ANDROID_RELEASE "Package a non-debuggable Android release APK" OFF)
+set(_android_package_source "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android")
+if(OBS_ANDROID_RELEASE)
+  # Keep the development manifest untouched; stage release resources in the build tree.
+  set(_android_package_source "${CMAKE_CURRENT_BINARY_DIR}/android-package-source")
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android/" DESTINATION "${_android_package_source}" PATTERN "libs" EXCLUDE)
+  file(READ "${_android_package_source}/AndroidManifest.xml" _android_manifest)
+  string(REGEX REPLACE "android:debuggable[ \t\r\n]*=[ \t\r\n]*\"[^\"]*\"" "android:debuggable=\"false\"" _android_manifest "${_android_manifest}")
+  file(WRITE "${_android_package_source}/AndroidManifest.xml" "${_android_manifest}")
+endif()
+
 set_target_properties(
   obs-studio
   PROPERTIES
     QT_ANDROID_EXTRA_LIBS "${_extra_libs}"
     # 清单与 FileProvider 的 paths 都在 cmake/android/ 下自带；一旦设了这个变量，
     # androiddeployqt 就不再拿自己的模板覆盖清单（同 android-shell 的做法）。
-    QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android"
+    QT_ANDROID_PACKAGE_SOURCE_DIR "${_android_package_source}"
     QT_ANDROID_VERSION_NAME "0.1.0"
     QT_ANDROID_VERSION_CODE 1
     QT_ANDROID_COMPILE_SDK_VERSION 35

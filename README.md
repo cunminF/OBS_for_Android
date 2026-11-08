@@ -117,6 +117,29 @@ adb install -r releases/OBS-Android-arm64-v8a-wsl-<timestamp>.apk
 
 Enabled modules: `android-audio` `android-camera` `android-capture` `android-screen` `image-source` `nikon-source` `obs-encode-sink` `obs-ffmpeg` `obs-filters` `obs-outputs` `obs-transitions` `obs-x264` `rtmp-services` `text-freetype2`. Disabled: scripting, Idian Playground, Restream/Twitch/YouTube API integrations.
 
+#### Release builds
+
+The default command above remains a development build signed with the debug key. For a release, supply your own keystore (keep it outside the repository) and all four signing variables:
+
+```bash
+export ANDROID_RELEASE_KEYSTORE="$HOME/.android/obs-release.p12"
+export ANDROID_RELEASE_KEY_ALIAS=obs-release
+read -rsp 'Keystore password: ' ANDROID_RELEASE_STORE_PASSWORD; echo
+read -rsp 'Key password: ' ANDROID_RELEASE_KEY_PASSWORD; echo
+export ANDROID_RELEASE_STORE_PASSWORD ANDROID_RELEASE_KEY_PASSWORD
+bash scripts/build-frontend-apk-wsl.sh release
+```
+
+Release mode uses `build-fe-arm64-v8a-plugins-release/` and `CMAKE_BUILD_TYPE=Release`. It stages a separate package source with `android:debuggable="false"`, leaving the development manifest unchanged. Before building, it rejects missing signing variables, unreadable keystores, the repository debug certificate (even if copied or renamed), and certificates with `CN=Android Debug`. Passwords are passed to signing tools through environment variables.
+
+The APK is always signed with the selected key. Before archiving, the script checks the **packaged manifest** using `aapt2 dump badging` and runs `apksigner verify --verbose --print-certs`. A debuggable APK, invalid signature, unexpected signer, or failed inspection stops the build. Only checked APKs are archived as `releases/OBS-Android-arm64-v8a-wsl-release-<timestamp>.apk`.
+
+To run the release safety integration tests without building OBS, install JDK 17, Python 3, SDK build-tools 36.0.0 and platform android-35, set `JAVA_HOME` and `ANDROID_SDK_ROOT`, then run:
+
+```bash
+bash scripts/tests/test-apk-release-checks.sh
+```
+
 ### 3. When you only changed one .cpp
 
 Don't wait for a full Gradle/ninja round. Copy the **exact** compile command out of `build.ninja` (including `-Werror` and all `-D`/`-I` flags) and add `-fsyntax-only` to check it on the spot:
@@ -129,9 +152,9 @@ ninja -C build-fe-arm64-v8a-plugins -t commands plugins/android-screen/CMakeFile
 
 1. **Gradle 8.12/8.14 does not support JDK 25** (class file major version 69). `JAVA_HOME` must be pinned to JDK 17.
 2. **GitHub is not directly reachable inside WSL** — traffic goes through the host's proxy: the proxy client on the Windows host must enable "Allow LAN connections", and Windows Firewall must allow inbound traffic on that port (the WSL subnet counts as an external network). `fetch.sh` applies the proxy per domain automatically (override with the `OBS_PROXY` environment variable). Note that the host IP may change after a WSL restart — get the current one with `ip route | awk '/default/{print $3}'`.
-3. **`androiddeployqt` does not sign in release mode**; the script self-signs with `apksigner`. The `android-shell/debug.keystore` in this repo is the standard Android debug key (alias `androiddebugkey`, password `android`) — for local development only.
+3. **`androiddeployqt` does not sign in release mode**; the script self-signs with `apksigner`. The default build uses `android-shell/debug.keystore` (alias `androiddebugkey`, password `android`) for local development only. Use the explicit `release` command and your own signing variables for a release.
 4. **Plugin `.so` files must be manually staged into `libs/<abi>/` and Gradle's native intermediates must be wiped**, otherwise freshly built plugins don't make it into the package and you end up testing the previous version — that's what the "force repackage" section of `build-frontend-apk-wsl.sh` does. Always verify against the copy **inside the APK**, never the rundir copy.
-5. **OBS's `blog()` does not go to logcat.** Logs live on the device at `/data/user/0/com.obsproject.studio/files/.config/obs-studio/logs/*.txt`. The APK manifest carries `android:debuggable="true"`, so on a non-rooted device `adb exec-out run-as com.obsproject.studio cat ...` is enough — **remember to remove that attribute before any formal release build**.
+5. **OBS's `blog()` does not go to logcat.** Logs live on the device at `/data/user/0/com.obsproject.studio/files/.config/obs-studio/logs/*.txt`. Development APKs carry `android:debuggable="true"`, so on a non-rooted device `adb exec-out run-as com.obsproject.studio cat ...` is enough. The explicit `release` command disables this attribute in its staged manifest and rejects debuggable APKs before archiving.
 6. **Artifact identity can only be judged by content** (hashes / `strings` / behavior) — never by file size or mtime.
 
 ## Permissions (runtime / manifest)
